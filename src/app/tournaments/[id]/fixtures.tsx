@@ -1,150 +1,133 @@
+import Link from "next/link";
 import { clearFixtures, generateFixtures, updateMatchDetails } from "../../actions";
 import type { Match } from "@/db";
 import { roundName } from "@/lib/fixtures";
+import MatchCard from "@/components/match-card";
+import type { TeamInfo } from "./types";
 
 type Props = {
   tournamentId: number;
   format: string;
-  teamNames: Map<number, string>;
+  teams: TeamInfo[];
   fixtures: Match[];
   organizer: boolean;
+  round?: number;
 };
-
-// Dates are stored as entered and shown the same way (no time-zone shifting).
-function formatWhen(date: Date) {
-  return date.toLocaleString("en-GB", {
-    timeZone: "UTC",
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function toInputValue(date: Date | null) {
   return date ? date.toISOString().slice(0, 16) : "";
 }
 
-export default function Fixtures({ tournamentId, format, teamNames, fixtures, organizer }: Props) {
-  const name = (id: number | null) => (id === null ? "TBD" : teamNames.get(id) ?? "Unknown team");
+export default function Fixtures({ tournamentId, format, teams, fixtures, organizer, round }: Props) {
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  const base = `/tournaments/${tournamentId}`;
 
-  // Teams added after the fixtures were generated.
-  const scheduled = new Set(fixtures.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
-  const missing = [...teamNames.keys()].filter((id) => !scheduled.has(id));
-
-  const rounds = new Map<number, Match[]>();
-  for (const m of fixtures) {
-    rounds.set(m.round, [...(rounds.get(m.round) ?? []), m]);
+  if (fixtures.length === 0) {
+    return (
+      <section className="card flex flex-col items-start gap-4">
+        <h2 className="h-display text-2xl">{format === "knockout" ? "No draw yet" : "No fixtures yet"}</h2>
+        <p className="text-sm text-muted">
+          {format === "knockout"
+            ? "Generating will randomly pair the teams for the first round."
+            : "Generating will schedule every team to play every other team once."}
+        </p>
+        {organizer &&
+          (teams.length < 2 ? (
+            <Link href={`${base}?tab=teams`} className="btn">
+              Add teams first
+            </Link>
+          ) : (
+            <form action={generateFixtures}>
+              <input type="hidden" name="tournamentId" value={tournamentId} />
+              <button className="btn">Generate fixtures for {teams.length} teams</button>
+            </form>
+          ))}
+      </section>
+    );
   }
-  const roundNumbers = [...rounds.keys()].sort((a, b) => a - b);
+
+  const rounds = [...new Set(fixtures.map((m) => m.round))].sort((a, b) => a - b);
+  // Default to the first round that still has matches to play.
+  const firstOpen = rounds.find((r) => fixtures.some((m) => m.round === r && (m.status === "upcoming" || m.status === "live")));
+  const current = round && rounds.includes(round) ? round : firstOpen ?? rounds[0];
+  const shown = fixtures.filter((m) => m.round === current);
+
+  const scheduled = new Set(fixtures.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
+  const missing = teams.filter((t) => !scheduled.has(t.id));
+
+  const side = (id: number | null, score: number | null, status: string) => {
+    const t = id === null ? undefined : byId.get(id);
+    return { name: t?.name ?? "TBD", faculty: t?.faculty, score: status === "upcoming" ? null : score ?? 0 };
+  };
 
   return (
-    <section id="fixtures" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-bold">Fixtures</h2>
-        {organizer && fixtures.length > 0 && (
-          <form action={clearFixtures}>
-            <input type="hidden" name="tournamentId" value={tournamentId} />
-            <button className="btn-danger">Clear fixtures</button>
-          </form>
-        )}
+    <section className="flex flex-col gap-4">
+      <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
+        {rounds.map((r) => (
+          <Link
+            key={r}
+            href={`${base}?round=${r}`}
+            aria-current={r === current ? "page" : undefined}
+            className="inline-flex min-h-10 min-w-12 shrink-0 items-center justify-center rounded-full border border-white/15 px-4 font-display text-base font-extrabold text-soft aria-[current=page]:border-white aria-[current=page]:bg-white aria-[current=page]:text-ink"
+          >
+            {format === "knockout" ? roundName(format, r, teams.length) : `R${r}`}
+          </Link>
+        ))}
       </div>
 
-      {fixtures.length === 0 ? (
-        <div className="card space-y-3">
-          <p className="text-slate-600">
-            {format === "knockout"
-              ? "No draw yet. Generating will randomly pair teams for the first round."
-              : "No fixtures yet. Generating will schedule every team to play every other team once."}
-          </p>
-          {organizer &&
-            (teamNames.size < 2 ? (
-              <p className="text-sm text-slate-500">Add at least two teams first.</p>
-            ) : (
-              <form action={generateFixtures}>
-                <input type="hidden" name="tournamentId" value={tournamentId} />
-                <button className="btn">Generate fixtures</button>
-              </form>
-            ))}
-        </div>
-      ) : (
-        <>
-          {organizer && missing.length > 0 && (
-            <p className="rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800">
-              {missing.map((id) => name(id)).join(", ")} {missing.length === 1 ? "was" : "were"} added
-              after the fixtures were made. Clear and regenerate to include{" "}
-              {missing.length === 1 ? "it" : "them"}.
-            </p>
-          )}
+      {format !== "knockout" && <h2 className="h-display text-2xl">{roundName(format, current, teams.length)}</h2>}
 
-          {roundNumbers.map((round) => (
-            <div key={round} className="card space-y-2 p-0">
-              <h3 className="border-b border-slate-100 px-5 py-3 font-bold">
-                {roundName(format, round, teamNames.size)}
-              </h3>
-              <ul className="divide-y divide-slate-100">
-                {rounds.get(round)!.map((m) => (
-                  <li key={m.id} className="px-5 py-3">
-                    {m.status === "bye" ? (
-                      <p className="text-slate-600">
-                        <span className="font-semibold text-ink">{name(m.homeTeamId)}</span>{" "}
-                        {format === "knockout" ? "gets a bye to the next round" : "has a bye this round"}
-                      </p>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-3">
-                          <span className="flex-1 text-right font-semibold">{name(m.homeTeamId)}</span>
-                          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
-                            VS
-                          </span>
-                          <span className="flex-1 font-semibold">{name(m.awayTeamId)}</span>
-                        </div>
-                        <p className="mt-1 text-center text-xs text-slate-500">
-                          {m.scheduledAt ? formatWhen(m.scheduledAt) : "Date not set"}
-                          {m.venue ? ` · ${m.venue}` : ""}
-                        </p>
-                        {organizer && (
-                          <details className="mt-2 text-sm">
-                            <summary className="cursor-pointer text-center text-turf">
-                              Set date &amp; venue
-                            </summary>
-                            <form
-                              action={updateMatchDetails}
-                              className="mt-2 flex flex-wrap items-center justify-center gap-2"
-                            >
-                              <input type="hidden" name="tournamentId" value={tournamentId} />
-                              <input type="hidden" name="matchId" value={m.id} />
-                              <input
-                                type="datetime-local"
-                                name="scheduledAt"
-                                defaultValue={toInputValue(m.scheduledAt)}
-                                className="input w-auto"
-                              />
-                              <input
-                                name="venue"
-                                defaultValue={m.venue ?? ""}
-                                placeholder="Venue"
-                                className="input w-auto"
-                              />
-                              <button className="btn-ghost">Save</button>
-                            </form>
-                          </details>
-                        )}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+      {organizer && missing.length > 0 && (
+        <p className="rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          {missing.map((t) => t.name).join(", ")} {missing.length === 1 ? "was" : "were"} added after the fixtures were
+          made. Clear and regenerate to include {missing.length === 1 ? "it" : "them"}.
+        </p>
+      )}
 
-          {format === "knockout" && (
-            <p className="text-sm text-slate-500">
-              Later rounds appear once first-round results are in (coming in the next steps).
-            </p>
-          )}
-        </>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {shown.map((m) => (
+          <MatchCard
+            key={m.id}
+            status={m.status}
+            when={m.scheduledAt}
+            venue={m.venue}
+            home={side(m.homeTeamId, m.homeScore, m.status)}
+            away={m.awayTeamId === null ? null : side(m.awayTeamId, m.awayScore, m.status)}
+            byeText={format === "knockout" ? "gets a bye to the next round" : "has a bye this round"}
+          >
+            {organizer && m.status !== "bye" && (
+              <details className="group text-sm">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-center rounded-xl bg-white/5 font-semibold text-lime">
+                  {m.scheduledAt || m.venue ? "Edit date & venue" : "Set date & venue"}
+                </summary>
+                <form action={updateMatchDetails} className="mt-3 flex flex-col gap-2">
+                  <input type="hidden" name="tournamentId" value={tournamentId} />
+                  <input type="hidden" name="matchId" value={m.id} />
+                  <label className="sr-only" htmlFor={`when-${m.id}`}>
+                    Date and time
+                  </label>
+                  <input id={`when-${m.id}`} type="datetime-local" name="scheduledAt" defaultValue={toInputValue(m.scheduledAt)} className="input" />
+                  <label className="sr-only" htmlFor={`venue-${m.id}`}>
+                    Venue
+                  </label>
+                  <input id={`venue-${m.id}`} name="venue" defaultValue={m.venue ?? ""} placeholder="Venue, e.g. Sports Centre" className="input" />
+                  <button className="btn">Save</button>
+                </form>
+              </details>
+            )}
+          </MatchCard>
+        ))}
+      </div>
+
+      {format === "knockout" && (
+        <p className="text-sm text-muted">Later rounds appear once first-round results are in.</p>
+      )}
+
+      {organizer && (
+        <form action={clearFixtures} className="text-right">
+          <input type="hidden" name="tournamentId" value={tournamentId} />
+          <button className="btn-danger">Clear fixtures</button>
+        </form>
       )}
     </section>
   );

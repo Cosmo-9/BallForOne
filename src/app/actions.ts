@@ -12,6 +12,7 @@ import {
   startSession,
 } from "@/lib/auth";
 import { FORMATS, SPORTS } from "@/lib/options";
+import { findFaculty } from "@/lib/faculties";
 
 function field(formData: FormData, name: string) {
   const value = formData.get(name);
@@ -58,7 +59,7 @@ export async function createTournament(formData: FormData) {
     .returning({ id: tournaments.id });
 
   revalidatePath("/");
-  redirect(`/tournaments/${created.id}`);
+  redirect(`/tournaments/${created.id}?tab=teams`);
 }
 
 export async function deleteTournament(formData: FormData) {
@@ -76,13 +77,42 @@ export async function addTeam(formData: FormData) {
   const tournamentId = idField(formData, "tournamentId");
   const name = field(formData, "name");
   const department = field(formData, "department");
-  if (!name) redirect(`/tournaments/${tournamentId}?error=team`);
+  if (!name) redirect(`/tournaments/${tournamentId}?tab=teams&error=team`);
 
   await db()
     .insert(teams)
     .values({ tournamentId, name, department: department || null });
 
   revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+// Add one team per ticked faculty, named after the faculty.
+export async function addFacultyTeams(formData: FormData) {
+  await requireOrganizer();
+  const tournamentId = idField(formData, "tournamentId");
+  const page = `/tournaments/${tournamentId}?tab=teams`;
+
+  const picked = formData.getAll("faculty").flatMap((v) => {
+    const f = findFaculty(String(v));
+    return f ? [f] : [];
+  });
+  if (picked.length === 0) redirect(`${page}&error=pick-faculty`);
+
+  const existing = await db()
+    .select({ name: teams.name })
+    .from(teams)
+    .where(eq(teams.tournamentId, tournamentId));
+  const taken = new Set(existing.map((t) => t.name.toLowerCase()));
+  const fresh = picked.filter((f) => !taken.has(f.name.toLowerCase()));
+
+  if (fresh.length > 0) {
+    await db()
+      .insert(teams)
+      .values(fresh.map((f) => ({ tournamentId, name: f.name, department: f.name })));
+  }
+
+  revalidatePath(`/tournaments/${tournamentId}`);
+  redirect(page);
 }
 
 export async function deleteTeam(formData: FormData) {
@@ -93,7 +123,7 @@ export async function deleteTeam(formData: FormData) {
     .delete(teams)
     .where(and(eq(teams.id, teamId), eq(teams.tournamentId, tournamentId)));
   revalidatePath(`/tournaments/${tournamentId}`);
-  redirect(`/tournaments/${tournamentId}`);
+  redirect(`/tournaments/${tournamentId}?tab=teams`);
 }
 
 // ---------- Players ----------
@@ -175,7 +205,7 @@ export async function generateFixtures(formData: FormData) {
     );
 
   revalidatePath(page);
-  redirect(`${page}#fixtures`);
+  redirect(`/tournaments/${tournamentId}`);
 }
 
 export async function clearFixtures(formData: FormData) {
@@ -193,7 +223,7 @@ export async function clearFixtures(formData: FormData) {
 
   await db().delete(matches).where(eq(matches.tournamentId, tournamentId));
   revalidatePath(page);
-  redirect(`${page}#fixtures`);
+  redirect(`/tournaments/${tournamentId}`);
 }
 
 export async function updateMatchDetails(formData: FormData) {
