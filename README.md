@@ -2,9 +2,11 @@
 
 Your own ball-sport tournament ecosystem: organize departmental and inter-faculty competitions.
 
-**Built so far (step 1, Foundation):** organizer sign-in, create tournaments, add teams and players. Anyone can view; only signed-in organizers can change things.
+**Built so far:**
+- Step 1, Foundation: organizer sign-in, create tournaments, add teams and players. Anyone can view; only signed-in organizers can change things.
+- Step 2, Fixtures: one click generates a full league schedule (round-robin) or a random knockout draw, with byes for odd numbers. Organizers can set each match's date and venue.
 
-**Coming next:** fixture generation, results and standings, brackets, live scores, player stats, MVP voting, digital player cards.
+**Coming next:** results and standings, brackets, live scores, player stats, MVP voting, digital player cards.
 
 ## Stack
 
@@ -14,7 +16,7 @@ Your own ball-sport tournament ecosystem: organize departmental and inter-facult
 
 ## Setup
 
-1. **Create the tables.** In the Neon dashboard, open the SQL Editor, paste in [`db/setup.sql`](db/setup.sql) and run it.
+1. **Create the tables.** In the Neon dashboard, open the SQL Editor, paste in [`db/setup.sql`](db/setup.sql) and run it. If you set up the database before a later step was added, run just that step's file from [`db/updates/`](db/updates) instead.
 2. **Add environment variables** in Vercel (Project → Settings → Environment Variables), or in `.env.local` when running locally. See [`.env.example`](.env.example):
    - `DATABASE_URL`: your Neon connection string
    - `ADMIN_PASSWORD`: the password organizers sign in with

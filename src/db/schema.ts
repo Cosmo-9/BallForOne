@@ -34,6 +34,24 @@ export const players = pgTable("players", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// A fixture between two teams. awayTeamId is empty when it's a bye.
+export const matches = pgTable("matches", {
+  id: serial("id").primaryKey(),
+  tournamentId: integer("tournament_id")
+    .notNull()
+    .references(() => tournaments.id, { onDelete: "cascade" }),
+  round: integer("round").notNull(),
+  homeTeamId: integer("home_team_id").references(() => teams.id, { onDelete: "cascade" }),
+  awayTeamId: integer("away_team_id").references(() => teams.id, { onDelete: "cascade" }),
+  scheduledAt: timestamp("scheduled_at"),
+  venue: text("venue"),
+  status: text("status").notNull().default("upcoming"), // upcoming, live, finished, bye
+  homeScore: integer("home_score"),
+  awayScore: integer("away_score"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type Tournament = typeof tournaments.$inferSelect;
 export type Team = typeof teams.$inferSelect;
 export type Player = typeof players.$inferSelect;
+export type Match = typeof matches.$inferSelect;

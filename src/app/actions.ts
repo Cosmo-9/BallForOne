@@ -1,9 +1,10 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { db, players, teams, tournaments } from "@/db";
+import { db, matches, players, teams, tournaments } from "@/db";
+import { knockoutFirstRound, roundRobin } from "@/lib/fixtures";
 import {
   endSession,
   passwordIsCorrect,
@@ -129,5 +130,89 @@ export async function deletePlayer(formData: FormData) {
     .delete(players)
     .where(and(eq(players.id, playerId), eq(players.teamId, teamId)));
   revalidatePath(`/tournaments/${tournamentId}/teams/${teamId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+// ---------- Fixtures ----------
+
+export async function generateFixtures(formData: FormData) {
+  await requireOrganizer();
+  const tournamentId = idField(formData, "tournamentId");
+  const page = `/tournaments/${tournamentId}`;
+
+  const [tournament] = await db()
+    .select()
+    .from(tournaments)
+    .where(eq(tournaments.id, tournamentId));
+  if (!tournament) redirect("/");
+
+  const existing = await db()
+    .select({ id: matches.id })
+    .from(matches)
+    .where(eq(matches.tournamentId, tournamentId))
+    .limit(1);
+  if (existing.length > 0) redirect(`${page}?error=fixtures-exist`);
+
+  const teamRows = await db()
+    .select({ id: teams.id })
+    .from(teams)
+    .where(eq(teams.tournamentId, tournamentId));
+  if (teamRows.length < 2) redirect(`${page}?error=need-teams`);
+
+  const ids = teamRows.map((t) => t.id);
+  const pairings = tournament.format === "knockout" ? knockoutFirstRound(ids) : roundRobin(ids);
+
+  await db()
+    .insert(matches)
+    .values(
+      pairings.map((p) => ({
+        tournamentId,
+        round: p.round,
+        homeTeamId: p.homeTeamId,
+        awayTeamId: p.awayTeamId,
+        status: p.awayTeamId === null ? "bye" : "upcoming",
+      })),
+    );
+
+  revalidatePath(page);
+  redirect(`${page}#fixtures`);
+}
+
+export async function clearFixtures(formData: FormData) {
+  await requireOrganizer();
+  const tournamentId = idField(formData, "tournamentId");
+  const page = `/tournaments/${tournamentId}`;
+
+  // Don't wipe fixtures once results have been entered.
+  const played = await db()
+    .select({ id: matches.id })
+    .from(matches)
+    .where(and(eq(matches.tournamentId, tournamentId), inArray(matches.status, ["live", "finished"])))
+    .limit(1);
+  if (played.length > 0) redirect(`${page}?error=fixtures-played`);
+
+  await db().delete(matches).where(eq(matches.tournamentId, tournamentId));
+  revalidatePath(page);
+  redirect(`${page}#fixtures`);
+}
+
+export async function updateMatchDetails(formData: FormData) {
+  await requireOrganizer();
+  const tournamentId = idField(formData, "tournamentId");
+  const matchId = idField(formData, "matchId");
+  const when = field(formData, "scheduledAt"); // "2026-11-20T15:00" from the date picker
+  const venue = field(formData, "venue");
+
+  let scheduledAt: Date | null = null;
+  if (when) {
+    scheduledAt = new Date(`${when}:00Z`);
+    if (Number.isNaN(scheduledAt.getTime())) scheduledAt = null;
+  }
+
+  await db()
+    .update(matches)
+    .set({ scheduledAt, venue: venue || null })
+    .where(and(eq(matches.id, matchId), eq(matches.tournamentId, tournamentId)));
+
   revalidatePath(`/tournaments/${tournamentId}`);
 }

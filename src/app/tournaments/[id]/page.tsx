@@ -2,11 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, count, eq } from "drizzle-orm";
 import { addTeam, deleteTournament } from "../../actions";
-import { db, players, teams, tournaments } from "@/db";
+import { db, matches, players, teams, tournaments } from "@/db";
+import Fixtures from "./fixtures";
 import { isOrganizer } from "@/lib/auth";
 import { formatLabel, sportOf } from "@/lib/options";
 
 export const dynamic = "force-dynamic";
+
+const ERRORS: Record<string, string> = {
+  "need-teams": "Add at least two teams before generating fixtures.",
+  "fixtures-exist": "Fixtures already exist. Clear them first to regenerate.",
+  "fixtures-played": "Some matches already have results, so fixtures can't be cleared.",
+};
 
 export default async function TournamentPage({
   params,
@@ -26,7 +33,7 @@ export default async function TournamentPage({
     .where(eq(tournaments.id, tournamentId));
   if (!tournament) notFound();
 
-  const [teamList, organizer] = await Promise.all([
+  const [teamList, fixtures, organizer] = await Promise.all([
     db()
       .select({
         id: teams.id,
@@ -39,8 +46,16 @@ export default async function TournamentPage({
       .where(eq(teams.tournamentId, tournamentId))
       .groupBy(teams.id)
       .orderBy(asc(teams.name)),
+    db()
+      .select()
+      .from(matches)
+      .where(eq(matches.tournamentId, tournamentId))
+      .orderBy(asc(matches.round), asc(matches.id)),
     isOrganizer(),
   ]);
+
+  const teamNames = new Map(teamList.map((t) => [t.id, t.name]));
+  const errorMessage = error ? ERRORS[error] : undefined;
 
   const sport = sportOf(tournament.sport);
 
@@ -58,6 +73,18 @@ export default async function TournamentPage({
           {tournament.host ? ` · ${tournament.host}` : ""}
         </p>
       </div>
+
+      {errorMessage && (
+        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{errorMessage}</p>
+      )}
+
+      <Fixtures
+        tournamentId={tournamentId}
+        format={tournament.format}
+        teamNames={teamNames}
+        fixtures={fixtures}
+        organizer={organizer}
+      />
 
       <section className="space-y-3">
         <h2 className="text-xl font-bold">Teams ({teamList.length})</h2>
